@@ -1,0 +1,104 @@
+name: Update README Gallery
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '**/*.png'
+      - '**/*.jpg'
+      - '**/*.jpeg'
+      - '**/*.gif'
+      - '**/*.webp'
+      - '**/*.svg'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-gallery:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Scan repo subfolders and replace Gallery Section in README.md
+        env:
+          GITHUB_REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          python3 - << 'EOF'
+          import os
+          import re
+          import urllib.parse
+
+          repo_url = os.environ["GITHUB_REPO_URL"]
+          branch = os.environ["BRANCH"]
+          valid_exts = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
+          excluded_dirs = {".git", ".github", "node_modules"}
+
+          gallery_lines = ["---", ""]
+
+          # Walk through all directories in the repo sorted alphabetically
+          for root, dirs, files in os.walk("."):
+              # Skip hidden folders and excluded system directories
+              dirs[:] = sorted([d for d in dirs if not d.startswith(".") and d not in excluded_dirs])
+
+              # Skip the root directory itself so only subfolders are processed
+              if root == ".":
+                  continue
+
+              images = sorted([
+                  f for f in files
+                  if os.path.splitext(f)[1].lower() in valid_exts
+              ])
+
+              if images:
+                  # Clean relative folder path (e.g., "./Anime/Season 1" -> "Anime/Season 1")
+                  rel_folder = os.path.relpath(root, ".")
+                  gallery_lines.append(f"## 📂 {rel_folder}")
+                  gallery_lines.append("")
+
+                  for img_name in images:
+                      rel_path = f"{rel_folder}/{img_name}".replace("\\", "/")
+                      encoded_path = urllib.parse.quote(rel_path)
+                      raw_url = f"{repo_url}/blob/{branch}/{encoded_path}"
+
+                      gallery_lines.append(f'<a href="{raw_url}" target="_blank">')
+                      gallery_lines.append(f'  <img src="{encoded_path}" width="220" style="border-radius:10px;margin:8px;box-shadow:0 2px 6px rgba(0,0,0,0.2);" />')
+                      gallery_lines.append('</a>')
+
+                  gallery_lines.extend(["", "---", ""])
+
+          gallery_text = "\n".join(gallery_lines)
+
+          with open("README.md", "r", encoding="utf-8") as f:
+              content = f.read()
+
+          new_block = f"<!-- GALLERY-START -->\n{gallery_text}\n<!-- GALLERY-END -->"
+          pattern = r"<!-- GALLERY-START -->.*?<!-- GALLERY-END -->"
+
+          if re.search(pattern, content, flags=re.DOTALL):
+              updated = re.sub(pattern, new_block, content, flags=re.DOTALL)
+              with open("README.md", "w", encoding="utf-8") as f:
+                  f.write(updated)
+              print("Successfully updated README.md gallery.")
+          else:
+              print("Error: <!-- GALLERY-START --> markers missing in README.md!")
+              exit(1)
+          EOF
+
+      - name: Commit and push gallery updates
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add README.md
+
+          if ! git diff --staged --quiet; then
+            git commit -m "chore: rebuild README image gallery"
+            git push
+          else
+            echo "No gallery changes detected."
+          fi
