@@ -42,10 +42,8 @@ jobs:
 
           # Walk through all directories in the repo sorted alphabetically
           for root, dirs, files in os.walk("."):
-              # Skip hidden folders and excluded system directories
               dirs[:] = sorted([d for d in dirs if not d.startswith(".") and d not in excluded_dirs])
 
-              # Skip the root directory itself so only subfolders are processed
               if root == ".":
                   continue
 
@@ -55,7 +53,6 @@ jobs:
               ])
 
               if images:
-                  # Clean relative folder path (e.g., "./Anime/Season 1" -> "Anime/Season 1")
                   rel_folder = os.path.relpath(root, ".")
                   gallery_lines.append(f"## 📂 {rel_folder}")
                   gallery_lines.append("")
@@ -72,21 +69,32 @@ jobs:
                   gallery_lines.extend(["", "---", ""])
 
           gallery_text = "\n".join(gallery_lines)
-
-          with open("README.md", "r", encoding="utf-8") as f:
-              content = f.read()
-
           new_block = f"<!-- GALLERY-START -->\n{gallery_text}\n<!-- GALLERY-END -->"
           pattern = r"<!-- GALLERY-START -->.*?<!-- GALLERY-END -->"
 
-          if re.search(pattern, content, flags=re.DOTALL):
-              updated = re.sub(pattern, new_block, content, flags=re.DOTALL)
-              with open("README.md", "w", encoding="utf-8") as f:
-                  f.write(updated)
-              print("Successfully updated README.md gallery.")
+          # Find existing readme case-insensitively, or default to README.md
+          readme_file = next(
+              (f for f in os.listdir(".") if f.lower() == "readme.md"),
+              "README.md"
+          )
+
+          if os.path.exists(readme_file):
+              with open(readme_file, "r", encoding="utf-8") as f:
+                  content = f.read()
+
+              if re.search(pattern, content, flags=re.DOTALL):
+                  updated = re.sub(pattern, new_block, content, flags=re.DOTALL)
+              else:
+                  # Append markers to the end if they weren't added yet
+                  updated = f"{content.rstrip()}\n\n{new_block}\n"
           else:
-              print("Error: <!-- GALLERY-START --> markers missing in README.md!")
-              exit(1)
+              # Create a brand new README.md if none exists
+              updated = f"# Image Gallery\n\n{new_block}\n"
+
+          with open(readme_file, "w", encoding="utf-8") as f:
+              f.write(updated)
+
+          print(f"Successfully updated {readme_file}.")
           EOF
 
       - name: Commit and push gallery updates
@@ -94,7 +102,7 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add README.md
+          git add -A README.md readme.md 2>/dev/null || git add .
 
           if ! git diff --staged --quiet; then
             git commit -m "chore: rebuild README image gallery"
